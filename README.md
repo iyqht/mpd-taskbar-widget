@@ -13,6 +13,8 @@ A lightweight, native Fluent Design system tray control widget for Music Player 
 * **Smooth Marquee:** Seamless right-scrolling continuous loop text for long song titles/artists.
 * **Robust Threading:** Background `QThread` polling loop with clean exit synchronization.
 
+![MPD Widget Preview](preview.png)
+
 ---
 
 ## Prerequisites
