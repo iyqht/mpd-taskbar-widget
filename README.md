@@ -7,6 +7,8 @@ A lightweight, native Fluent Design system tray control widget for Music Player 
 ## Features
 
 * **System Tray Integration:** Sits discreetly in the system tray.
+* **Hover Reveal:** Hovering over the tray icon automatically pops up the widget; moves seamlessly between icon and flyout, hiding automatically when the cursor leaves.
+* **One-Click Controls:** Left-clicking the tray icon immediately toggles play/pause without closing the flyout.
 * **Smart Positioning:** Click the tray icon to pop up the widget dynamically right above it.
 * **Auto-Hiding:** Automatically dismisses when losing focus.
 * **Live Album Art:** Fetches and displays current track cover art directly from MPD (`readpicture`).
