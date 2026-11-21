@@ -1,7 +1,10 @@
 import sys
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QEvent, QTimer
-from PySide6.QtGui import QPixmap, QIcon, QAction, QPainter, QFontMetrics, QFont
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget, QSystemTrayIcon, QMenu, QLabel
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QPoint
+from PySide6.QtGui import QPixmap, QAction, QPainter, QFontMetrics, QFont, QCursor
+from PySide6.QtWidgets import (
+    QApplication, QHBoxLayout, QVBoxLayout, QWidget,
+    QSystemTrayIcon, QMenu, QLabel
+)
 from mpd import MPDClient, MPDError
 
 from qfluentwidgets import (
@@ -9,6 +12,7 @@ from qfluentwidgets import (
     TransparentToolButton, FluentIcon as FIF,
     setTheme, Theme
 )
+
 
 # --- Continuous Loop Marquee Label ---
 class MarqueeLabel(QLabel):
@@ -18,7 +22,7 @@ class MarqueeLabel(QLabel):
         self.is_overflowing = False
         self.text_width = 0
         self.space_width = 0
-        
+
         self.timer = QTimer(self)
         self.timer.setInterval(30)
         self.timer.timeout.connect(self.update_offset)
@@ -33,7 +37,7 @@ class MarqueeLabel(QLabel):
         fm = QFontMetrics(self.font())
         self.text_width = fm.horizontalAdvance(self.text())
         self.space_width = fm.horizontalAdvance("      ")
-        
+
         if self.text_width > self.width():
             self.is_overflowing = True
             self.offset = 0.0
@@ -48,12 +52,12 @@ class MarqueeLabel(QLabel):
     def update_offset(self):
         if not self.is_overflowing:
             return
-        
+
         self.offset += 1.2
         total_loop_width = self.text_width + self.space_width
         if self.offset >= total_loop_width:
             self.offset = 0.0
-            
+
         self.update()
 
     def paintEvent(self, event):
@@ -63,12 +67,13 @@ class MarqueeLabel(QLabel):
             painter = QPainter(self)
             painter.setPen(self.palette().color(self.foregroundRole()))
             painter.setFont(self.font())
-            
+
             x = int(self.offset) - self.text_width - self.space_width
             y = self.height() - 4
-            
+
             painter.drawText(x, y, self.text())
             painter.drawText(x + self.text_width + self.space_width, y, self.text())
+
 
 # --- MPD Async Worker Thread ---
 class MPDWorker(QThread):
@@ -89,13 +94,13 @@ class MPDWorker(QThread):
             try:
                 self.client.connect(self.host, self.port)
                 self.connection_changed.emit(True)
-                
+
                 while self.running:
                     status = self.client.status()
                     song = self.client.currentsong()
                     self.status_updated.emit(status)
                     self.song_updated.emit(song)
-                    
+
                     if "file" in song:
                         try:
                             art_data = self.client.readpicture(song["file"])
@@ -116,7 +121,6 @@ class MPDWorker(QThread):
     def stop(self):
         self.running = False
         try:
-            # Force disconnect to break out of blocking client.idle() calls immediately
             self.client.close()
             self.client.disconnect()
         except Exception:
@@ -131,11 +135,13 @@ class MPDWorker(QThread):
         except Exception as e:
             print(f"MPD Command Error ({func}): {e}")
 
+
 # --- Taskbar Square Flyout Widget ---
 class FluentMPDFlyout(QWidget):
     def __init__(self, tray_icon: QSystemTrayIcon):
         super().__init__()
         self.tray_icon = tray_icon
+        self.opened_by_hover = False
         setTheme(Theme.AUTO)
 
         self.setWindowFlags(
@@ -144,15 +150,16 @@ class FluentMPDFlyout(QWidget):
             Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        
+
         self.worker = MPDWorker()
         self.init_ui()
         self.bind_signals()
+        self.init_hover_timers()
         self.worker.start()
 
     def init_ui(self):
         self.setFixedSize(210, 240)
-        
+
         self.card = CardWidget(self)
         self.card.setFixedSize(210, 240)
         self.card.setStyleSheet("""
@@ -192,7 +199,7 @@ class FluentMPDFlyout(QWidget):
         self.title_label.setStyleSheet("color: white;")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setFixedWidth(190)
-        
+
         self.artist_label = CaptionLabel("Waiting for MPD...", self.card)
         self.artist_label.setFont(artist_font)
         self.artist_label.setStyleSheet("color: rgba(255, 255, 255, 0.6);")
@@ -227,6 +234,60 @@ class FluentMPDFlyout(QWidget):
         main_layout.addLayout(info_layout)
         main_layout.addLayout(controls_layout)
 
+    def init_hover_timers(self):
+        self.hover_poll_timer = QTimer(self)
+        self.hover_poll_timer.setInterval(60)
+        self.hover_poll_timer.timeout.connect(self._poll_cursor)
+        self.hover_poll_timer.start()
+
+        self.hover_open_timer = QTimer(self)
+        self.hover_open_timer.setSingleShot(True)
+        self.hover_open_timer.setInterval(120)
+        self.hover_open_timer.timeout.connect(self._open_from_hover)
+
+        self.hover_hide_timer = QTimer(self)
+        self.hover_hide_timer.setSingleShot(True)
+        self.hover_hide_timer.setInterval(150)
+        self.hover_hide_timer.timeout.connect(self._hide_from_hover)
+
+    def _is_cursor_over_tray(self, pos: QPoint) -> bool:
+        tray_rect = self.tray_icon.geometry()
+        return not tray_rect.isEmpty() and tray_rect.adjusted(-2, -2, 2, 2).contains(pos)
+
+    def _is_cursor_over_flyout(self, pos: QPoint) -> bool:
+        if not self.isVisible():
+            return False
+        # Slight margin bridges the 8px gap between tray icon and flyout
+        return self.frameGeometry().adjusted(-4, -4, 4, 12).contains(pos)
+
+    def _poll_cursor(self):
+        pos = QCursor.pos()
+        over_tray = self._is_cursor_over_tray(pos)
+        over_flyout = self._is_cursor_over_flyout(pos)
+
+        if over_tray:
+            self.hover_hide_timer.stop()
+            if not self.isVisible() and not self.hover_open_timer.isActive():
+                self.hover_open_timer.start()
+        elif over_flyout:
+            self.hover_open_timer.stop()
+            self.hover_hide_timer.stop()
+        else:
+            self.hover_open_timer.stop()
+            if self.isVisible() and self.opened_by_hover and not self.hover_hide_timer.isActive():
+                self.hover_hide_timer.start()
+
+    def _open_from_hover(self):
+        if not self.isVisible():
+            self.opened_by_hover = True
+            self._position_and_show(activate=False)
+
+    def _hide_from_hover(self):
+        pos = QCursor.pos()
+        if not self._is_cursor_over_tray(pos) and not self._is_cursor_over_flyout(pos):
+            self.hide()
+            self.opened_by_hover = False
+
     def bind_signals(self):
         self.worker.song_updated.connect(self.on_song_change)
         self.worker.status_updated.connect(self.on_status_change)
@@ -258,11 +319,7 @@ class FluentMPDFlyout(QWidget):
             self.title_label.setText("Disconnected")
             self.artist_label.setText("Reconnecting...")
 
-    def toggle_position_above_tray(self):
-        if self.isVisible():
-            self.hide()
-            return
-
+    def _position_and_show(self, activate: bool):
         tray_rect = self.tray_icon.geometry()
         screen_geometry = QApplication.primaryScreen().geometry()
 
@@ -281,18 +338,25 @@ class FluentMPDFlyout(QWidget):
         self.move(x, y)
         self.show()
         self.raise_()
-        self.activateWindow()
+        if activate:
+            self.activateWindow()
 
-    def changeEvent(self, event):
-        if event.type() == QEvent.Type.ActivationChange and not self.isActiveWindow():
+    def toggle_position_above_tray(self):
+        if self.isVisible() and not self.opened_by_hover:
             self.hide()
-        super().changeEvent(event)
+            return
+
+        self.opened_by_hover = False
+        self._position_and_show(activate=True)
 
     def closeEvent(self, event):
-        # Gracefully stop worker thread on exit to prevent thread-destruction warnings
+        self.hover_poll_timer.stop()
+        self.hover_open_timer.stop()
+        self.hover_hide_timer.stop()
         self.worker.stop()
         self.worker.wait(1000)
         event.accept()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
@@ -302,26 +366,21 @@ if __name__ == "__main__":
     widget = FluentMPDFlyout(tray_icon)
 
     tray_menu = QMenu()
-    toggle_action = QAction("Toggle MPD Widget", app)
-    toggle_action.triggered.connect(widget.toggle_position_above_tray)
     quit_action = QAction("Quit", app)
-    
-    # Ensure proper cleanup when clicking quit in tray menu
+
     def clean_exit():
-        widget.worker.stop()
-        widget.worker.wait(1000)
+        widget.close()
         app.quit()
 
     quit_action.triggered.connect(clean_exit)
 
-    tray_menu.addAction(toggle_action)
     tray_menu.addAction(quit_action)
     tray_icon.setContextMenu(tray_menu)
-    
+
     tray_icon.activated.connect(
-        lambda reason: widget.toggle_position_above_tray() 
+        lambda reason: widget.worker.send_command("pause")
         if reason == QSystemTrayIcon.ActivationReason.Trigger else None
     )
-    
+
     tray_icon.show()
     sys.exit(app.exec())
