@@ -13,66 +13,64 @@ from qfluentwidgets import (
     setTheme, Theme
 )
 
-
-# --- Continuous Loop Marquee Label ---
+# --- Smooth Scrolling Marquee Label ---
 class MarqueeLabel(QLabel):
     def __init__(self, text="", parent=None):
         super().__init__(text, parent)
-        self.offset = 0.0
+        self.offset = 0
+        self.scroll_direction = 1
         self.is_overflowing = False
-        self.text_width = 0
-        self.space_width = 0
-
+        
+        # Timer to drive the smooth marquee animation
         self.timer = QTimer(self)
-        self.timer.setInterval(30)
+        self.timer.setInterval(40)  # ~25 FPS smooth scrolling
         self.timer.timeout.connect(self.update_offset)
 
     def setText(self, text):
-        if self.text() == text:
-            return
         super().setText(text)
         self.check_overflow()
 
     def check_overflow(self):
         fm = QFontMetrics(self.font())
-        self.text_width = fm.horizontalAdvance(self.text())
-        self.space_width = fm.horizontalAdvance("      ")
-
-        if self.text_width > self.width():
+        text_width = fm.horizontalAdvance(self.text())
+        
+        if text_width > self.width():
             self.is_overflowing = True
-            self.offset = 0.0
+            self.offset = 0
             if not self.timer.isActive():
                 self.timer.start()
         else:
             self.is_overflowing = False
             self.timer.stop()
-            self.offset = 0.0
+            self.offset = 0
         self.update()
 
     def update_offset(self):
         if not self.is_overflowing:
             return
+        
+        fm = QFontMetrics(self.font())
+        text_width = fm.horizontalAdvance(self.text())
+        max_offset = text_width - self.width() + 10
 
-        self.offset += 1.2
-        total_loop_width = self.text_width + self.space_width
-        if self.offset >= total_loop_width:
-            self.offset = 0.0
-
+        self.offset += self.scroll_direction * 1.5  # Scroll speed
+        
+        # Bounce back and forth smoothly
+        if self.offset >= max_offset or self.offset <= 0:
+            self.scroll_direction *= -1
+            
         self.update()
 
     def paintEvent(self, event):
         if not self.is_overflowing:
+            # Standard centered text if it fits
             super().paintEvent(event)
         else:
+            # Custom painted scrolling text for long titles
             painter = QPainter(self)
             painter.setPen(self.palette().color(self.foregroundRole()))
             painter.setFont(self.font())
-
-            x = int(self.offset) - self.text_width - self.space_width
-            y = self.height() - 4
-
-            painter.drawText(x, y, self.text())
-            painter.drawText(x + self.text_width + self.space_width, y, self.text())
+            painter.drawText(int(-self.offset), self.height() - 6, self.text())
 
 
 # --- MPD Async Worker Thread ---
