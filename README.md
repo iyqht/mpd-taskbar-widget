@@ -12,7 +12,7 @@ A lightweight, native Fluent Design system tray control widget for Music Player 
 * **Smart Positioning:** Click the tray icon to pop up the widget dynamically right above it.
 * **Auto-Hiding:** Automatically dismisses when losing focus.
 * **Live Album Art:** Fetches and displays current track cover art directly from MPD (`readpicture`).
-* **Smooth Marquee:** Seamless right-scrolling continuous loop text for long song titles/artists.
+* **Smooth Marquee:** Seamless left-scrolling continuous loop text for long song titles/artists.
 * **Robust Threading:** Background `QThread` polling loop with clean exit synchronization.
 
 ![MPD Widget Preview](preview.png)
